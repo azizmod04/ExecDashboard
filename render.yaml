@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: exec-dashboard-api
+    runtime: python
+    repo: https://github.com/YOUR_USERNAME/exec-dashboard
+    branch: main
+    buildCommand: pip install -r backend/requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        value: sqlite:///./exec_dashboard.db
+      - key: ALLOWED_ORIGINS
+        value: https://YOUR_SITE.netlify.app
