@@ -99,7 +99,7 @@ export function DashboardPage({ dashboardId, onSelectDashboard, onNavigate }: Pr
       {/* KPI Strip */}
       {dashboard.kpis && dashboard.kpis.length > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
-          {dashboard.kpis.map((kpi, i) => (
+          {dashboard.kpis.map((kpi: any, i: number) => (
             <KpiCard key={kpi.id || i} kpi={kpi} />
           ))}
         </div>

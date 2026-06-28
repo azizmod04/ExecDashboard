@@ -1,16 +1,70 @@
 import { useState, useRef, useCallback } from 'react';
+import * as XLSX from 'xlsx';
 import { Upload, FileSpreadsheet, FileBarChart, FileText, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { api } from '../services/api';
-import { UploadResult } from '../types';
 
 interface Props {
   onDashboardCreated: (id: string) => void;
 }
 
+function localParseExcel(file: File): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target!.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+        const sheets: string[] = [];
+        const allData: Record<string, any> = {};
+        let mainSheet = '';
+        let maxRows = 0;
+
+        workbook.SheetNames.forEach((name) => {
+          const sheet = workbook.Sheets[name];
+          const rows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+          sheets.push(name);
+          allData[name] = rows;
+          if (rows.length > maxRows) { maxRows = rows.length; mainSheet = name; }
+        });
+
+        const rows = allData[mainSheet] || [];
+        const columns = rows.length > 0
+          ? Object.keys(rows[0]).map((key) => {
+              const vals = rows.map((r: any) => r[key]).filter((v: any) => v !== '');
+              const numCount = vals.filter((v: any) => !isNaN(parseFloat(v))).length;
+              return { name: key, type: numCount > vals.length * 0.6 ? 'numeric' : 'string' };
+            })
+          : [];
+
+        resolve({
+          dashboard_id: 'local_' + Date.now(),
+          name: file.name.replace(/\.[^/.]+$/, ''),
+          source_type: 'excel',
+          row_count: rows.length,
+          col_count: columns.length,
+          sheets,
+          kpis: columns.filter((c: any) => c.type === 'numeric').slice(0, 6).map((c: any) => ({
+            name: `Average ${c.name}`, column_name: c.name,
+            current_value: rows.reduce((s: number, r: any) => s + (parseFloat(r[c.name]) || 0), 0) / Math.max(rows.length, 1),
+            target_value: 0, trend: 'stable', status: 'pending',
+          })),
+          data_quality: { total_rows: rows.length, issues: [], quality_score: 100 },
+          _localData: rows,
+          _localColumns: columns,
+        });
+      } catch (err: any) {
+        reject(new Error('فشل قراءة الملف: ' + err.message));
+      }
+    };
+    reader.onerror = () => reject(new Error('فشل قراءة الملف'));
+    reader.readAsArrayBuffer(file);
+  });
+}
+
 export function UploadPage({ onDashboardCreated }: Props) {
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [result, setResult] = useState<UploadResult | null>(null);
+  const [result, setResult] = useState<any>(null);
   const [error, setError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -30,8 +84,25 @@ export function UploadPage({ onDashboardCreated }: Props) {
     try {
       const res = await api.upload.file(file);
       setResult(res);
-    } catch (err: any) {
-      setError(err.message);
+      const dashboards = JSON.parse(localStorage.getItem('local_dashboards') || '[]');
+      dashboards.push({ id: res.dashboard_id, name: res.name, source_type: res.source_type, row_count: res.row_count, col_count: res.col_count, createdAt: new Date().toISOString() });
+      localStorage.setItem('local_dashboards', JSON.stringify(dashboards));
+    } catch {
+      // Fallback: parse locally in the browser
+      if (['.xlsx', '.xls', '.csv'].includes(ext)) {
+        try {
+          const res = await localParseExcel(file);
+          const dashboards = JSON.parse(localStorage.getItem('local_dashboards') || '[]');
+          const entry = { id: res.dashboard_id, name: res.name, source_type: res.source_type, row_count: res.row_count, col_count: res.col_count, createdAt: new Date().toISOString(), _localData: res._localData, _localColumns: res._localColumns, _local: true };
+          dashboards.push(entry);
+          localStorage.setItem('local_dashboards', JSON.stringify(dashboards));
+          setResult(res);
+        } catch (err: any) {
+          setError(err.message);
+        }
+      } else {
+        setError('ملفات PowerBI و Tableau تحتاج الباك أند. حمل الملف على السيرفر أولاً.');
+      }
     }
     setUploading(false);
   }, []);
@@ -135,7 +206,7 @@ export function UploadPage({ onDashboardCreated }: Props) {
             <div>
               <p className="text-sm text-gray-400 mb-2">الأوراق المكتشفة:</p>
               <div className="flex flex-wrap gap-2">
-                {result.sheets.map((s) => (
+                {result.sheets.map((s: string) => (
                   <span key={s} className="text-xs bg-surface-900 text-gray-300 px-3 py-1.5 rounded-lg border border-gray-800">
                     📋 {s}
                   </span>
